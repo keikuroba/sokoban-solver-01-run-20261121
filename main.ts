@@ -283,6 +283,7 @@ function solveRoom(
   room: Room,
   requireExit: boolean,
   nodeCap: number,
+  greedy = false,
 ): RoomSolution {
   const domain = new Set<number>(room.cells);
   domain.add(room.door);
@@ -292,15 +293,8 @@ function solveRoom(
   const startBoxes = [...room.boxes].sort((a, b) => a - b);
 
   // Binary-heap priority queue, deterministic tie-break by insertion order.
-  type Node = {
-    f: number;
-    g: number;
-    n: number;
-    player: number;
-    boxes: number[];
-    parent: Node | null;
-    push: Push | null;
-  };
+  // Greedy mode ranks by h alone (f = h); otherwise f = g + h (A*).
+  type Node = SearchNode & { f: number; g: number; n: number };
   const heap: Node[] = [];
   let counter = 0;
   const heapPush = (nd: Node): void => {
@@ -366,11 +360,9 @@ function solveRoom(
       // Otherwise keep searching: this goal state cannot exit.
     }
     if (++expansions > nodeCap) return null;
-    // Cells the player can reach without moving a box.
+    // Cells the player can reach without moving a box (BFS over the
+    // domain minus the boxes).
     const boxSet = new Set<number>(cur.boxes);
-    const reach = bfsDist(g, cur.player, domain);
-    // Remove box cells from reach: bfsDist walked through boxes, so
-    // recompute properly — BFS over domain minus boxes.
     const reachSet = new Set<number>();
     {
       const q: number[] = [cur.player];
@@ -390,7 +382,6 @@ function solveRoom(
         }
       }
     }
-    void reach;
     for (let bi = 0; bi < cur.boxes.length; bi++) {
       const b = cur.boxes[bi];
       const by = yOf(g, b);
@@ -415,40 +406,30 @@ function solveRoom(
         const nk = keyOf(b, nb);
         if (best.has(nk) && best.get(nk)! <= ng) continue;
         best.set(nk, ng);
-        heapPush({ f: ng + h, g: ng, n: counter++, player: b, boxes: nb, parent: cur, push: { box: b, dir: d } });
+        heapPush({ f: greedy ? h : ng + h, g: ng, n: counter++, player: b, boxes: nb, parent: cur, push: { box: b, dir: d } });
       }
     }
   }
   return null;
 }
 
-// Expand a macro-push chain into the player's individual steps.
-function expandPushes(g: Grid, room: Room, goalNode: {
+// Expand a macro-push chain into the player's individual steps. Every
+// node stores its box layout; node i>0 carries the push that led to it
+// from node i-1, so each push is preceded by the player's BFS walk to
+// the pushing cell (boxes of the pre-push layout are obstacles).
+type SearchNode = {
   player: number;
   boxes: number[];
-  parent: { player: number; boxes: number[]; parent: unknown; push: Push | null } | null;
+  parent: SearchNode | null;
   push: Push | null;
-}): RoomSolution {
-  const pushes: Push[] = [];
-  let n: { parent: unknown; push: Push | null } | null = goalNode as never;
-  // Walk the parent chain collecting pushes (root has push null).
-  const chain: { push: Push | null }[] = [];
-  let cur: { parent: { parent: unknown; push: Push | null } | null; push: Push | null } | null =
-    goalNode as never;
+};
+
+function expandPushes(g: Grid, room: Room, goalNode: SearchNode): RoomSolution {
+  const nodes: SearchNode[] = [];
+  let cur: SearchNode | null = goalNode;
   while (cur !== null) {
-    chain.push(cur);
-    cur = cur.parent as never;
-  }
-  chain.reverse();
-  // chain[0] is the start node; each later node carries the push that led to it.
-  // Reconstruct box layouts along the chain to know each push's start state.
-  // We stored the box array in every node; recover them in order.
-  const nodes: { player: number; boxes: number[]; push: Push | null }[] = [];
-  let c2: { parent: unknown; player: number; boxes: number[]; push: Push | null } | null =
-    goalNode as never;
-  while (c2 !== null) {
-    nodes.push(c2 as never);
-    c2 = c2.parent as never;
+    nodes.push(cur);
+    cur = cur.parent;
   }
   nodes.reverse();
   const domain = new Set<number>(room.cells);
@@ -468,7 +449,6 @@ function expandPushes(g: Grid, room: Room, goalNode: {
     if (path === null) return null;
     steps += path + dir.ch;
     player = box; // after the push the player stands where the box was
-    void pushes;
   }
   return { steps, endPlayer: player };
 }
@@ -527,12 +507,7 @@ function solveLevel(text: string): string {
 // Greedy best-first fallback (f = h only) with the same move generation;
 // used only if A* exhausts its node cap, so a level still gets solved.
 function solveRoomGreedy(g: Grid, room: Room, requireExit: boolean): RoomSolution {
-  // Reuse solveRoom with a much larger cap but a greedy priority by
-  // wrapping: simplest correct approach is a second A* with h scaled so
-  // f is dominated by h. Implement by calling a shared search with
-  // weight. (Kept small: delegate to solveRoom with a big cap; A* with
-  // an admissible heuristic is already fast on these rooms.)
-  return solveRoom(g, room, requireExit, 5000000);
+  return solveRoom(g, room, requireExit, 5000000, true);
 }
 
 for (const id of readdirSync(I).sort()) {
