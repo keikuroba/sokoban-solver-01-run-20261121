@@ -16,7 +16,7 @@
 // executions write the same bytes. One run handles the whole set.
 //
 // Local run: mkdir -p out && MAKEFUN_INPUT_DIR=practice/input MAKEFUN_OUTPUT_DIR=out node main.ts
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const I = process.env.MAKEFUN_INPUT_DIR ?? '/input';
@@ -511,6 +511,13 @@ function solveRoomGreedy(g: Grid, room: Room, requireExit: boolean): RoomSolutio
 }
 
 for (const id of readdirSync(I).sort()) {
+  let st;
+  try {
+    st = statSync(join(I, id));
+  } catch {
+    continue;
+  }
+  if (!st.isDirectory()) continue;
   const moves = solveLevel(readFileSync(join(I, id, 'level.txt'), 'utf8'));
   mkdirSync(join(O, id), { recursive: true });
   writeFileSync(join(O, id, 'solution.txt'), `${moves}\n`);
